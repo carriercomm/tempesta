@@ -705,10 +705,11 @@ tfw_http_adjust_req(TfwHttpReq *req)
 	int r = 0;
 	TfwHttpMsg *m = (TfwHttpMsg *)req;
 
+#if 0	/* FIXME - Broken code */
 	r = tfw_http_add_or_append_forwarded_for(m);
 	if (r)
 		return r;
-
+#endif
 	if ((m->flags & __TFW_HTTP_CONN_MASK) != TFW_HTTP_CONN_KA)
 		r = tfw_http_set_hdr_connection(m, TFW_HTTP_CONN_KA);
 
