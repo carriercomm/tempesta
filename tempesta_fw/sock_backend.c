@@ -76,19 +76,15 @@ struct list_head backend_socks = LIST_HEAD_INIT(backend_socks);
 static int
 tfw_backend_connect(struct socket **sock, const TfwAddr *addr)
 {
-	static struct {
-		SsProto	_placeholder;
-		int	type;
-	} dummy_proto = {
-		.type = TFW_FSM_HTTP,
-	};
-
+	int r;
 	TfwServer *srv;
 	struct sock *sk;
+	SsProto dummy_proto = {
+		.type = TFW_FSM_HTTP,
+	};
 	struct sockaddr sa = addr->sa;
 	sa_family_t family = addr->sa.sa_family;
 	size_t sza = tfw_addr_sa_len(addr);
-	int r;
 
 	r = sock_create_kern(family, SOCK_STREAM, IPPROTO_TCP, sock);
 	if (r) {
