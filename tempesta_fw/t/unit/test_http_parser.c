@@ -222,7 +222,7 @@ TEST(http_parser, fills_hdr_tbl)
 	const char *s_xch = "X-Custom-Hdr: custom header values";
 	const char *s_xff = "X-Forwarded-For: 127.0.0.1, example.com";
 	const char *s_dummy9 = "Dummy9: 9";
-	const char *s_cc  = "Cache-Control: private, max-age=0, no-cache";
+	const char *s_cc  = "Cache-Control: max-age=0, private, min-fresh=42";
 
 	FOR_REQ("GET /foo HTTP/1.1\r\n"
 		"User-Agent: Wget/1.13.4 (linux-gnu)\r\n"
@@ -241,7 +241,7 @@ TEST(http_parser, fills_hdr_tbl)
 		"Dummy7: 7\r\n"
 		"Dummy8: 8\r\n"
 		"Dummy9: 9\r\n"
-		"Cache-Control: private, max-age=0, no-cache\r\n"
+		"Cache-Control: max-age=0, private, min-fresh=42\r\n"
 		"\r\n")
 	{
 		h_tbl = req->h_tbl;

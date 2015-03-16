@@ -364,6 +364,20 @@ __parse_int(TfwStr *chunk, unsigned char *data, size_t len, unsigned int *acc)
 }
 
 /**
+ * Accts like __parse_int(), but in addition allows a comma separator.
+ */
+static inline int
+__parse_int_comma(TfwStr *chunk, unsigned char *data, size_t len,
+		  unsigned int *acc)
+{
+	/* source: ", \t\n\v\f\r" */
+	static const unsigned long ws_comma_a[] ____cacheline_aligned = {
+		0x0000100100003e00UL, 0, 0, 0
+	};
+	return __parse_int_a(chunk, data, len, ws_comma_a, acc);
+};
+
+/**
  * Parse probably chunked string representation of an hexadecimal integer.
  * Returns number of parsed bytes (in data, w/o stored chunk) on success
  * or negative value otherwise.
@@ -1233,7 +1247,7 @@ __req_parse_cache_control(TfwHttpReq *req, unsigned char *data, size_t *lenrval)
 	__FSM_STATE(Req_I_CC_MaxAgeV) {
 		unsigned int acc = 0;
 		size_t plen = len - (size_t)(p - data);
-		int n = __parse_int(chunk, p, plen, &acc);
+		int n = __parse_int_comma(chunk, p, plen, &acc);
 		if (n < 0)
 			return n;
 		req->cache_ctl.max_age = acc;
@@ -1243,7 +1257,7 @@ __req_parse_cache_control(TfwHttpReq *req, unsigned char *data, size_t *lenrval)
 	__FSM_STATE(Req_I_CC_MinFreshV) {
 		unsigned int acc = 0;
 		size_t plen = len - (size_t)(p - data);
-		int n = __parse_int(chunk, p, plen, &acc);
+		int n = __parse_int_comma(chunk, p, plen, &acc);
 		if (n < 0)
 			return n;
 		req->cache_ctl.max_fresh = acc;
@@ -1280,7 +1294,7 @@ __req_parse_cache_control(TfwHttpReq *req, unsigned char *data, size_t *lenrval)
 		if (c == '=')
 			__FSM_I_MOVE(Req_I_CC_Ext);
 		if (IN_ALPHABET(c, hdr_a))
-			__FSM_I_MOVE(Req_I_CC);
+			__FSM_I_JMP(Req_I_CC);
 		if (!isspace(c))
 			return CSTR_NEQ;
 		/* fall through */
@@ -1296,7 +1310,6 @@ __req_parse_cache_control(TfwHttpReq *req, unsigned char *data, size_t *lenrval)
 			goto done;
 		}
 		if (isspace(c))
-			/* Eat all spaces including '\r'. */
 			__FSM_I_MOVE(Req_I_CC_EoL);
 		return CSTR_NEQ;
 	}
