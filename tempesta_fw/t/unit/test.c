@@ -29,6 +29,30 @@ test_fixture_fn_t test_teardown_fn;
 void
 test_register_failure(void)
 {
+	/* TODO: run tests with logging disabled, and re-run the failed test
+	 *       with enabled logs.
+	 *
+	 * The problem with logging is that it is hard to find a real error
+	 * message among all logs generated during a test run.
+	 * That happens because:
+	 *  - Some tests intentionally make calls with invalid input data.
+	 *    The code generates TFW_ERR() messages indistinguishable from
+	 *    real errors.
+	 *  - Overall, there is a lot of debugging output, and usually you
+	 *    don't need it unless the test is failed.
+	 *
+	 * The proposed solution is to register our own Tempesta FW logger and
+	 * suppress all messages until a test is failed. When a failure happens,
+	 * we can re-run the failed test and print all the log messages, and
+	 * thus avoid all this noise in the test log.
+	 *
+	 * Currently the Tempesta FW logger module interface is not established
+	 * yet, so here is just a BUG() that terminates the the testing process.
+	 * It doesn't prevent flooding, but at least it makes interesting
+	 * messages appear at the end of the log where they can be found easily.
+	 */
+	BUG();
+
 	++test_fail_counter;
 }
 
