@@ -59,4 +59,15 @@
 #define IF_DEBUG if (0)
 #endif
 
+/**
+ * The BUG_ON() macro which is disabled in a release build.
+ * It is used for performance-critical places where any extra overhead is highly
+ * undesirable, but it is still useful to check an invariant.
+ */
+#ifdef DEBUG
+#define DEBUG_BUG_ON(condition) BUG_ON(condition)
+#else
+#define DEBUG_BUG_ON(condition)
+#endif
+
 #endif /* __TFW_LIB_H__ */

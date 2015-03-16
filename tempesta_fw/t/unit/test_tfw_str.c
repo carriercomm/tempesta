@@ -74,7 +74,7 @@ make_compound_str(const char *data)
 	str = alloc_str();
 
 	do {
-		chunk = tfw_str_add_compound(str_pool, str);
+		chunk = tfw_str_alloc_chunk(str_pool, str);
 		chunk->len = min(total_len, ++chunk_len % 4);
 		chunk->ptr = (void *)data;
 		data += chunk->len;

@@ -85,39 +85,50 @@ validate_key(const char *key, int len)
 #endif /* ifndef DEBUG */
 
 /**
- * Add compound piece to @str and return pointer to the piece.
+ * Allocate an empty chunk at the end of the @str.
  */
 TfwStr *
-tfw_str_add_compound(TfwPool *pool, TfwStr *str)
+tfw_str_alloc_chunk(TfwPool *pool, TfwStr *str)
 {
+	TfwStr *new_chunk, *chunks_vec;
+
 	validate_tfw_str(str);
 
-	if (unlikely(str->flags & TFW_STR_COMPOUND)) {
-		unsigned int l = str->len * sizeof(TfwStr);
-		unsigned char *p = tfw_pool_realloc(pool, str->ptr, l,
-						    l + sizeof(TfwStr));
-		if (!p)
+	/* Fast path: we assume, that most strings consist of only one chunk.
+	 * If so, then we embed the single chunk right into the TfwStr structure
+	 * and thus avoid a presumably expensive memory allocation. */
+	if (likely(TFW_STR_IS_EMPTY(str)))
+		return str;
+
+	/* Slow path 1: the second chunk is being added, allocate space for two
+	 * chunks: the new one, and the chunk which is embedded in TfwStr. */
+	if (likely(TFW_STR_IS_PLAIN(str))) {
+		chunks_vec = tfw_pool_alloc(pool, 2 * sizeof(TfwStr));
+		if (unlikely(!chunks_vec))
 			return NULL;
-		str->ptr = p;
-		str->len++;
-	}
-	else {
-		TfwStr *a = tfw_pool_alloc(pool, 2 * sizeof(TfwStr));
-		if (!a)
-			return NULL;
-		a[0].ptr = str->ptr;
-		a[0].len = str->len;
-		a[0].flags = 0;  /* TODO: should we inherit flags here? */
-		str->ptr = a;
+		chunks_vec[0].ptr = str->ptr;
+		chunks_vec[0].len = str->len;
+		chunks_vec[0].flags = 0;  /* TODO: should we inherit flags? */
+		new_chunk = &chunks_vec[1];
+		str->ptr = chunks_vec;
 		str->len = 2;
 		str->flags |= TFW_STR_COMPOUND;
+	/* Slow path 2: the Nth chunk is added, completely re-allocate the whole
+	 * array of chunks to fit the new chunk. */
+	} else {
+		chunks_vec = tfw_pool_realloc(pool, str->ptr,
+					      sizeof(TfwStr) * (str->len),
+					      sizeof(TfwStr) * (str->len + 1));
+		if (unlikely(!chunks_vec))
+			return NULL;
+		str->ptr = chunks_vec;
+		new_chunk = &chunks_vec[str->len++];
 	}
 
-	TFW_STR_INIT((TfwStr *)str->ptr + str->len - 1);
-
-	return ((TfwStr *)str->ptr + str->len - 1);
+	TFW_STR_INIT(new_chunk);
+	return new_chunk;
 }
-DEBUG_EXPORT_SYMBOL(tfw_str_add_compound);
+DEBUG_EXPORT_SYMBOL(tfw_str_alloc_chunk);
 
 /**
  * Sum length of all chunks in a string (either compound or plain).
