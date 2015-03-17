@@ -167,13 +167,25 @@ do {									\
 /* The same as __FSM_I_MOVE_n(), but exactly for jumps w/o data moving. */
 #define __FSM_I_JMP(to)			do { goto to; } while (0)
 
-/* Automaton transition from state @st to @st_next on character @ch. */
-#define __FSM_TX(st, ch, st_next)					\
+/* Conditional transition from state @st to @st_next. */
+#define __FSM_TX_COND(st, condition, st_next) 				\
 __FSM_STATE(st) {							\
-	if (likely(c == ch))						\
+	if (likely(condition))						\
 		__FSM_MOVE(st_next);					\
 	return TFW_BLOCK;						\
 }
+
+/* Automaton transition from state @st to @st_next on character @ch. */
+#define __FSM_TX(st, ch, st_next) \
+	__FSM_TX_COND(st, c == (ch), st_next)
+
+/* Case-insensitive version of __FSM_TX(). */
+#define __FSM_TX_LC(st, ch, st_next) 					\
+	DEBUG_BUG_ON(!isalpha(ch) || !islower(ch)); 			\
+	__FSM_TX_COND(st, LC(c) == (ch), st_next)
+
+/* NOTE: unlike __FSM_TX(), the _AF() and _AF_LWS() do tolower(ch).
+ * Perhaps they should be renamed to _LC_AF() and _LC_AF_LWS(). */
 
 /* Automaton transition with alphabet checking and fallback state. */
 #define __FSM_TX_AF(st, ch, st_next, a, st_fallback)			\
@@ -1072,9 +1084,17 @@ enum {
 	Req_MUSpace,
 	Req_MUSpaceOpt,
 	Req_Uri,
+	Req_UriSchemeH,
+	Req_UriSchemeHt,
+	Req_UriSchemeHtt,
+	Req_UriSchemeHttp,
+	Req_UriSchemeHttpColon,
+	Req_UriSchemeHttpColonSlash,
+	Req_UriHostStart,
 	Req_UriHost,
 	Req_UriHostEnd,
 	Req_UriPort,
+	Req_UriAbsPathStart,
 	Req_UriAbsPath,
 	Req_HttpVer,
 	Req_HttpVerT1,
@@ -1163,6 +1183,7 @@ enum {
 	Req_HdrX_Forwarded_For,
 	Req_HdrX_Forwarded_ForV,
 	Req_HdrOther,
+	Req_HdrOtherCrlf,
 	Req_HdrDone,
 	/* Body */
 	Req_Body,
@@ -1531,22 +1552,23 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 
 	/* URI */
 	__FSM_STATE(Req_Uri) {
-		if (likely(c == '/')) {
-			__FIELD_OPEN(&req->uri, p);
-			__FSM_MOVE(Req_UriAbsPath);
-		}
+		if (likely(c == '/'))
+			__FSM_JMP(Req_UriAbsPathStart);
 
+		/* "http://" fast path - compare several characters at once. */
 		if (likely((p + 7 <= data + len)
 			   && C4_INT_LCM(p, 'h', 't', 't', 'p')
 			   && *(p + 4) == ':'
 			   && *(p + 5) == '/'
 			   && *(p + 6) == '/'))
 		{
-			/* XXX: We set req->host here, but perhaps we should
-			 * also use the Host header (RFC2616 5.2, RFC7230 5.4)*/
-			__FIELD_OPEN(&req->host, p + 7);
-			__FSM_MOVE_n(Req_UriHost, 7);
+			__FSM_MOVE_n(Req_UriHostStart, 7);
 		}
+
+		/* "http://" slow path - step char-by-char. */
+		if (likely(LC(c) == 'h'))
+			__FSM_MOVE(Req_UriSchemeH);
+
 		return TFW_BLOCK;
 	}
 
@@ -1556,24 +1578,24 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 	 * We must not rewrite abs_path, but still can cast host part
 	 * to lower case.
 	 */
+	__FSM_STATE(Req_UriHostStart) {
+		/* XXX: We set req->host here, but perhaps we should
+		 * also use the Host header (RFC2616 5.2, RFC7230 5.4)*/
+		__FIELD_OPEN(&req->host, p);
+	}
 	__FSM_STATE(Req_UriHost) {
 		*p = LC(*p);
 		if (likely(isalnum(c) || c == '.' || c == '-'))
 			__FSM_MOVE(Req_UriHost);
-		__FSM_JMP(Req_UriHostEnd);
 	}
-
 	/* Host is read, start to read port or abs_path. */
 	__FSM_STATE(Req_UriHostEnd) {
 		__FIELD_CLOSE(&req->host, p);
 
-		if (likely(c == '/')) {
-			__FIELD_OPEN(&req->uri, p);
-			__FSM_MOVE(Req_UriAbsPath);
-		}
-		else if (c == ':') {
+		if (likely(c == '/'))
+			__FSM_JMP(Req_UriAbsPathStart);
+		else if (c == ':')
 			__FSM_MOVE(Req_UriPort);
-		}
 		else
 			return TFW_BLOCK;
 	}
@@ -1586,8 +1608,7 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 		if (unlikely(c != '/'))
 			return TFW_BLOCK;
 
-		__FIELD_OPEN(&req->uri, p);
-		__FSM_MOVE(Req_UriAbsPath);
+		__FSM_JMP(Req_UriAbsPathStart);
 	}
 
 	/* URI abs_path */
@@ -1595,6 +1616,9 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 	 * E.g., we get "/foo/bar/baz?query#fragment" instead of "/foo/bar/baz"
 	 * as we should according to RFC 2616 (3.2.2) and RFC 7230 (2.7).
 	 */
+	__FSM_STATE(Req_UriAbsPathStart) {
+		__FIELD_OPEN(&req->uri, p);
+	}
 	__FSM_STATE(Req_UriAbsPath) {
 		if (likely(IN_ALPHABET(c, uap_a)))
 			/* Move forward through possibly segmented data. */
@@ -1788,27 +1812,25 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 	 * extremely large).
 	 */
 	__FSM_STATE(Req_HdrOther) {
-		/* Just eat the header until LF. */
+		/* Seek to the first '\r' and close the header there. */
 		size_t plen = len - (size_t)(p - data);
-		unsigned char *lf = memchr(p, '\n', plen);
-		if (lf) {
-			/* Finish the header value at the position of CR.
-			 *
-			 * XXX: do we need the to handle multiple "\r\r\r\r"?
-			 * RFC7230 states that:
-			 *  HTTP-message = start-line *( header-field CRLF ) ...
-			 * And CRLF is defined as CR LF (just two characters).
-			 */
-			unsigned char *cr = lf - 1;
-			while (likely(cr != p) && unlikely(*(cr - 1) == '\r'))
-				--cr;
+		unsigned char *cr = memchr(p, '\r', plen);
+		if (cr) {
 			__HDR_CLOSE(req, TFW_HTTP_HDR_RAW, cr);
-
-			/* Move to just after LF. */
-			p = lf;
-			__FSM_MOVE(Req_Hdr);
+			__FSM_MOVE_n(Req_HdrOtherCrlf, (cr + 1) - p);
 		}
 		__FSM_MOVE_n(Req_HdrOther, plen);
+	}
+	__FSM_STATE(Req_HdrOtherCrlf) {
+		/* Eat optional "\r" before "\n" (e.g. "\r\r\r\r\r\n").
+		 * XXX: do we need this? RFC7230 states that:
+		 *  HTTP-message = start-line *( header-field CRLF )...
+		 * And CRLF is defined as CR LF (just two characters). */
+		if (unlikely(c == '\r'))
+			__FSM_MOVE(Req_HdrOtherCrlf);
+		if (likely(c == '\n'))
+			__FSM_MOVE(Req_Hdr);
+		return TFW_BLOCK;
 	}
 
 	/* Request headers are fully read. */
@@ -1854,6 +1876,14 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 		req->method = TFW_HTTP_METH_HEAD;
 		__FSM_MOVE(Req_MUSpaceOpt);
 	}
+
+	/* process URI scheme: "http://" */
+	__FSM_TX_LC(Req_UriSchemeH, 't', Req_UriSchemeHt);
+	__FSM_TX_LC(Req_UriSchemeHt, 't', Req_UriSchemeHtt);
+	__FSM_TX_LC(Req_UriSchemeHtt, 'p', Req_UriSchemeHttp);
+	__FSM_TX(Req_UriSchemeHttp, ':', Req_UriSchemeHttpColon);
+	__FSM_TX(Req_UriSchemeHttpColon, '/', Req_UriSchemeHttpColonSlash);
+	__FSM_TX(Req_UriSchemeHttpColonSlash, '/', Req_UriHostStart);
 
 	/* Parse HTTP version (1.1 and 1.0 are supported). */
 	__FSM_TX(Req_HttpVerT1, 'T', Req_HttpVerT2);
