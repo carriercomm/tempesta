@@ -1535,17 +1535,18 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 			__FIELD_OPEN(&req->uri, p);
 			__FSM_MOVE(Req_UriAbsPath);
 		}
-		if (likely(C4_INT_LCM(p, 'h', 't', 't', 'p')))
-			if (likely(*(p + 4) == ':' && *(p + 5) == '/'
-				   && *(p + 6) == '/'))
-			{
-				/*
-				 * Set req->host here making Host header value
-				 * ignored according to RFC2616 5.2.
-				 */
-				__FIELD_OPEN(&req->host, p + 7);
-				__FSM_MOVE_n(Req_UriHost, 7);
-			}
+
+		if (likely((p + 7 <= data + len)
+			   && C4_INT_LCM(p, 'h', 't', 't', 'p')
+			   && *(p + 4) == ':'
+			   && *(p + 5) == '/'
+			   && *(p + 6) == '/'))
+		{
+			/* XXX: We set req->host here, but perhaps we should
+			 * also use the Host header (RFC2616 5.2, RFC7230 5.4)*/
+			__FIELD_OPEN(&req->host, p + 7);
+			__FSM_MOVE_n(Req_UriHost, 7);
+		}
 		return TFW_BLOCK;
 	}
 
