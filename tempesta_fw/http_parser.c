@@ -610,26 +610,26 @@ do {									\
 #define __HDR_PARSE_VAL(st_curr, st_next, st_i, msg, func, id)		\
 __FSM_STATE(st_curr) {							\
 	int ret;							\
-	size_t plen;							\
+	size_t remaining_data_len = len - (size_t)(p - data);		\
+	size_t val_len = remaining_data_len;				\
 	TFW_DBG("hdr parse val: id=%s func=%s", #id, #func);		\
 	DEBUG_BUG_ON(p > data + len);					\
 	parser->_i_st = st_i;						\
-	plen = len - (size_t)(p - data);				\
-	ret = func(msg, p, &plen);					\
-	/* @plen - header value length */				\
-	/* @ret - next data (@plen + *CR + LF) */			\
-	TFW_DBG("hdr parsed: ret=%d plen=%ld\n", ret, plen);		\
+	ret = func(msg, p, &val_len);					\
+	/* @ret - next data (@val_len + *CR + LF) */			\
+	DEBUG_BUG_ON(val_len > remaining_data_len);			\
+	TFW_DBG("hdr parsed: ret=%d val_len=%ld\n", ret, val_len);	\
 	switch (ret) {							\
 	case CSTR_POSTPONE:						\
 		/* Not all the header data is parsed. */		\
-		__FSM_MOVE_n(st_curr, plen);				\
+		__FSM_MOVE_n(st_curr, remaining_data_len);		\
 	case CSTR_BADLEN: /* bad header length */			\
 	case CSTR_NEQ: /* bad header value */				\
 		return TFW_BLOCK;					\
 	default:							\
 		DEBUG_BUG_ON(ret <= 0);					\
 		/* The header value is fully parsed, move forward. */	\
-		__HDR_CLOSE(msg, id, p + plen);				\
+		__HDR_CLOSE(msg, id, p + val_len);			\
 		__FSM_MOVE_n(st_next, ret);				\
 	}								\
 }
