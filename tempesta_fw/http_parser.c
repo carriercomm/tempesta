@@ -1058,7 +1058,20 @@ enum {
 	Req_0,
 	/* Request line. */
 	Req_Method,
+	Req_MethodG,
+	Req_MethodGe,
+	Req_MethodGet,
+	Req_MethodP,
+	Req_MethodPo,
+	Req_MethodPos,
+	Req_MethodPost,
+	Req_MethodH,
+	Req_MethodHe,
+	Req_MethodHea,
+	Req_MethodHead,
 	Req_MUSpace,
+	Req_MUSpaceOpt,
+	Req_Uri,
 	Req_UriHost,
 	Req_UriHostEnd,
 	Req_UriPort,
@@ -1475,28 +1488,49 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 
 	/* HTTP method. */
 	__FSM_STATE(Req_Method) {
-		if (unlikely(p + 4 >= data + len))
+		/* Fast path: compare 4 characters at once. */
+		if (likely(p + 4 <= data + len)) {
+			switch (*(unsigned int *)p) {
+			case TFW_CHAR4_INT('G', 'E', 'T', ' '):
+				req->method = TFW_HTTP_METH_GET;
+				__FSM_MOVE_n(Req_MUSpaceOpt, 4);
+			case TFW_CHAR4_INT('H', 'E', 'A', 'D'):
+				req->method = TFW_HTTP_METH_HEAD;
+				__FSM_MOVE_n(Req_MUSpace, 4);
+			case TFW_CHAR4_INT('P', 'O', 'S', 'T'):
+				req->method = TFW_HTTP_METH_POST;
+				__FSM_MOVE_n(Req_MUSpace, 4);
+			}
 			return TFW_BLOCK;
-
-		switch (*(unsigned int *)p) {
-		case TFW_CHAR4_INT('G', 'E', 'T', ' '):
-			req->method = TFW_HTTP_METH_GET;
-			__FSM_MOVE_n(Req_MUSpace, 4);
-		case TFW_CHAR4_INT('H', 'E', 'A', 'D'):
-			req->method = TFW_HTTP_METH_HEAD;
-			__FSM_MOVE_n(Req_MUSpace, 4);
-		case TFW_CHAR4_INT('P', 'O', 'S', 'T'):
-			req->method = TFW_HTTP_METH_POST;
-			__FSM_MOVE_n(Req_MUSpace, 4);
 		}
 
+		/* Slow path: step char-by-char. */
+		switch (c) {
+			case 'G':
+				__FSM_MOVE(Req_MethodG);
+			case 'P':
+				__FSM_MOVE(Req_MethodP);
+			case 'H':
+				__FSM_MOVE(Req_MethodH);
+		}
 		return TFW_BLOCK; /* Unsupported method */
 	}
 
-	/* Eat spaces before URI and HTTP (only) scheme. */
+	/* Eat spaces after the HTTP method. RFC7230 3.1.1 states that there is
+	 * only one SP character. We parse many for robustness. */
 	__FSM_STATE(Req_MUSpace) {
-		if (likely(c == ' '))
-			__FSM_MOVE(Req_MUSpace);
+		if (unlikely(c != ' '))
+			return TFW_BLOCK;
+		__FSM_MOVE(Req_MUSpaceOpt);
+	}
+	__FSM_STATE(Req_MUSpaceOpt) {
+		if (unlikely(c == ' '))
+			__FSM_MOVE(Req_MUSpaceOpt);
+		__FSM_JMP(Req_Uri);
+	}
+
+	/* URI */
+	__FSM_STATE(Req_Uri) {
 		if (likely(c == '/')) {
 			__FIELD_OPEN(&req->uri, p);
 			__FSM_MOVE(Req_UriAbsPath);
@@ -1512,7 +1546,6 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 				__FIELD_OPEN(&req->host, p + 7);
 				__FSM_MOVE_n(Req_UriHost, 7);
 			}
-
 		return TFW_BLOCK;
 	}
 
@@ -1789,6 +1822,37 @@ tfw_http_parse_req(TfwHttpReq *req, unsigned char *data, size_t len)
 	TFW_HTTP_PARSE_BODY(Req, req);
 
 	/* ----------------    Improbable states    ---------------- */
+
+	/* HTTP Method processing. */
+	/* GET */
+	__FSM_TX(Req_MethodG, 'E', Req_MethodGe);
+	__FSM_TX(Req_MethodGe, 'T', Req_MethodGet);
+	__FSM_STATE(Req_MethodGet) {
+		if (unlikely(c != ' '))
+			return TFW_BLOCK;
+		req->method = TFW_HTTP_METH_GET;
+		__FSM_MOVE(Req_MUSpaceOpt);
+	}
+	/* POST */
+	__FSM_TX(Req_MethodP, 'O', Req_MethodPo);
+	__FSM_TX(Req_MethodPo, 'S', Req_MethodPos);
+	__FSM_TX(Req_MethodPos, 'T', Req_MethodPost);
+	__FSM_STATE(Req_MethodPost) {
+		if (unlikely(c != ' '))
+			return TFW_BLOCK;
+		req->method = TFW_HTTP_METH_POST;
+		__FSM_MOVE(Req_MUSpaceOpt);
+	}
+	/* HEAD */
+	__FSM_TX(Req_MethodH, 'E', Req_MethodHe);
+	__FSM_TX(Req_MethodHe, 'A', Req_MethodHea);
+	__FSM_TX(Req_MethodHea, 'D', Req_MethodHead);
+	__FSM_STATE(Req_MethodHead) {
+		if (unlikely(c != ' '))
+			return TFW_BLOCK;
+		req->method = TFW_HTTP_METH_HEAD;
+		__FSM_MOVE(Req_MUSpaceOpt);
+	}
 
 	/* Parse HTTP version (1.1 and 1.0 are supported). */
 	__FSM_TX(Req_HttpVerT1, 'T', Req_HttpVerT2);
