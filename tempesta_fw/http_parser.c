@@ -621,15 +621,22 @@ __FSM_STATE(st_curr) {							\
 	TFW_DBG("hdr parsed: ret=%d val_len=%ld\n", ret, val_len);	\
 	switch (ret) {							\
 	case CSTR_POSTPONE:						\
-		/* Not all the header data is parsed. */		\
+		/* The @func may yield when the value is fully parsed.	\
+		 * That may happen at EOL (End of Line) after the value.\
+		 * TODO: this is odd, the @func should parse only the	\
+		 * value, but not EOL after it. */			\
+		if (unlikely(val_len < remaining_data_len))		\
+			__HDR_CLOSE(msg, id, p + val_len);		\
 		__FSM_MOVE_n(st_curr, remaining_data_len);		\
 	case CSTR_BADLEN: /* bad header length */			\
 	case CSTR_NEQ: /* bad header value */				\
 		return TFW_BLOCK;					\
 	default:							\
 		DEBUG_BUG_ON(ret <= 0);					\
-		/* The header value is fully parsed, move forward. */	\
-		__HDR_CLOSE(msg, id, p + val_len);			\
+		/* The header data is fully parsed, move forward.	\
+		 * Close it if that was not done in CSTR_POSTPONE. */	\
+		if (likely(!TFW_STR_IS_EMPTY(&parser->hdr)))		\
+			__HDR_CLOSE(msg, id, p + val_len);		\
 		__FSM_MOVE_n(st_next, ret);				\
 	}								\
 }
