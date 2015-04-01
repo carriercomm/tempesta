@@ -804,6 +804,13 @@ tfw_http_req_process(TfwConnection *conn, unsigned char *data, size_t len)
 			;
 		}
 
+		/* The request is fully parsed, move to a corresponding state.*/
+		r = tfw_gfsm_move(&req->msg.state, TFW_HTTP_FSM_REQ_MSG, data,
+				  len);
+		TFW_DBG("GFSM return code %d\n", r);
+		if (r == TFW_BLOCK)
+			goto block;
+
 		/* Dispatch the request to appropriate server. */
 		srv_conn = tfw_sched_get_srv_conn((TfwMsg *)req);
 		if (!srv_conn) {
@@ -812,17 +819,11 @@ tfw_http_req_process(TfwConnection *conn, unsigned char *data, size_t len)
 			goto block;
 		}
 
-		/* Request is fully parsed, add it to the connection. */
+		/* Add it to the server connection. */
 		list_add_tail(&req->msg.msg_list, &srv_conn->msg_queue);
 		conn->msg = NULL;
 
 		tfw_http_establish_skb_hdrs((TfwHttpMsg *)req);
-		r = tfw_gfsm_move(&req->msg.state, TFW_HTTP_FSM_REQ_MSG, data,
-				  len);
-		TFW_DBG("GFSM return code %d\n", r);
-		if (r == TFW_BLOCK)
-			goto block;
-
 		tfw_cache_req_process(req, tfw_http_req_cache_cb, srv_conn);
 
 		if (!req->parser.data_off || req->parser.data_off == len)
