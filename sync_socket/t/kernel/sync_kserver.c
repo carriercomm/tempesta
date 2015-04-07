@@ -5,7 +5,8 @@
  * It works fully in softirq context as opposed to kserver working mostly in
  * kworker threads.
  *
- * Copyright (C) 2012-2013 NatSys Lab. (info@natsys-lab.com).
+ * Copyright (C) 2012-2014 NatSys Lab. (info@natsys-lab.com).
+ * Copyright (C) 2015 Tempesta Technologies, Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by
@@ -131,12 +132,6 @@ kserver_init(void)
 	struct socket *lsk;
 	struct sockaddr_in saddr;
 
-	r = ss_hooks_register(&ssocket_hooks);
-	if (r) {
-		printk(KERN_ERR "Can't register synchronous socket callbacks\n");
-		return r;
-	}
-
 	r = sock_create_kern(AF_INET, SOCK_STREAM, IPPROTO_TCP, &lsk);
 	if (r) {
 		printk(KERN_ERR "Can't listening socket\n");
@@ -147,7 +142,9 @@ kserver_init(void)
 	lsk->sk->sk_reuse = 1;
 
 	/* Set TCP handlers. */
-	ss_tcp_set_listen(lsk, (SsProto *)&my_proto);
+	ss_set_proto(lsk, (SsProto *)&my_proto, 0, &ssocket_hooks);
+	ss_set_listener(lsk);
+	ss_tcp_set_listen(lsk);
 
 	memset(&saddr, 0, sizeof(saddr));
 	saddr.sin_family = AF_INET;
@@ -170,7 +167,6 @@ kserver_init(void)
 err_call:
 	sock_release(lsk);
 err_create:
-	ss_hooks_unregister(&ssocket_hooks);
 	return r;
 }
 
@@ -190,8 +186,6 @@ kserver_exit(void)
 	 * softirq processing the sockets which are calling ssocket_hooks
 	 * callbacks.
 	 */
-
-	ss_hooks_unregister(&ssocket_hooks);
 
 	stat_print();
 }
